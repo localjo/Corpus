@@ -33,6 +33,11 @@ done
 [[ -n "$VAULT_DIR" ]] || usage
 [[ -d "$VAULT_DIR/.git" ]] || { echo "Not a git repo: $VAULT_DIR" >&2; exit 1; }
 
+# Syncthing often chowns the vault to PUID (e.g. 1000) while cron runs git as root — Git refuses
+# "dubious ownership" unless the directory is explicitly trusted. Use per-invocation config (Git 2.31+)
+# so we never require a manual ~/.gitconfig step for sync-loop itself.
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0="$VAULT_DIR"
+
 if [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   source "$ENV_FILE"

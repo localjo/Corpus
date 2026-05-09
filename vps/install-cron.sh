@@ -30,6 +30,13 @@ VAULT_DIR="$PARENT_DIR/$VAULT_NAME"
 [[ -x "$SYNC_SCRIPT" ]] || { echo "sync script missing/executable: $SYNC_SCRIPT" >&2; exit 1; }
 [[ -d "$VAULT_DIR/.git" ]] || { echo "Vault git repo not found: $VAULT_DIR" >&2; exit 1; }
 
+# Cron user often runs git as root while Syncthing owns the tree (different uid) — Git 2.35+ blocks that
+# unless the path is trusted. Record one explicit directory (not '*') for interactive git on the same user.
+if ! git config --global --get-all safe.directory 2>/dev/null | grep -Fxq "$VAULT_DIR"; then
+  git config --global --add safe.directory "$VAULT_DIR"
+  echo "Added Git safe.directory for this vault (cron user): $VAULT_DIR"
+fi
+
 LOCK_FILE="/tmp/corpus-sync-$(basename "$VAULT_DIR").lock"
 CRON_CMD="flock -n \"$LOCK_FILE\" \"$SYNC_SCRIPT\" --vault-dir \"$VAULT_DIR\" --branch \"$BRANCH\" --env-file \"$ENV_FILE\""
 CRON_EXPR="*/$INTERVAL * * * * $CRON_CMD"

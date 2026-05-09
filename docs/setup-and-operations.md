@@ -93,6 +93,19 @@ Then ensure Syncthing can write the vault tree (see **Host ownership** above), e
 /opt/Corpus/vps/install-cron.sh <vault-name>
 ```
 
+### Git “dubious ownership” (Syncthing `chown 1000` + cron as root)
+
+If the vault is owned by **`1000`** but **`git`** runs as **root**, Git **2.35+** can refuse the repo: *dubious ownership detected…*
+
+**What we do in Corpus**
+
+- **`sync-loop.sh`** exports **`GIT_CONFIG_*`** so this run trusts **only** `--vault-dir` (Git **2.31+**), with no manual config.
+- **`install-cron.sh`** idempotently runs **`git config --global --add safe.directory <that vault>`** for **whoever installs cron** so ad-hoc **`git -C /srv/vaults/…`** from the same user works too.
+
+**Is that safe?** Yes in the usual sense: you are not opening **`*`** (all directories). You are marking **one absolute path you control** as trusted for Git’s directory-ownership check (mitigation for [CVE-2022-24765](https://github.blog/2022-04-12-git-security-vulnerability-announced/)–style issues). Don’t add paths writable by untrusted users.
+
+Older than Git **2.31**: upgrade **`git`** on the VPS, or run **`sync-loop`** / **`git`** as the same UID that owns the vault directory (heavy).
+
 Each invocation:
 
 - Exits **`0` skip** if Syncthing **pull temps** (`.syncthing.*.tmp` or `~syncthing~*.tmp`) or unresolved **sync-conflict** files exist under the vault (incoming batch / conflict cleanup not finished).
