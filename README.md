@@ -28,8 +28,9 @@ On the VPS: `git`, `bash`, `curl`, `cron`, `flock`, `find`, `rg` (ripgrep — us
 2. Set author in `/opt/Corpus/vps/.env` (see `vps/.env.example`).
 3. Start Syncthing: `cd /opt/Corpus/vps && cp .env.example .env && docker compose up -d`.
 4. Bootstrap a vault: `./scripts/init-vault.sh git@github.com:you/my-vault.git`
-5. In Syncthing’s UI, folder path **`/srv/vaults/<name>`** (compose mounts host **`/srv/vaults`** at the same path in the container).
-6. Cron: `./vps/install-cron.sh <vault-name>`.
+5. Let Syncthing’s container user own the vault tree (default **`PUID`/`PGID` `1000`** in **`vps/docker-compose.yml`**): **`sudo chown -R 1000:1000 /srv/vaults`** (avoids **`permission denied`** on **`/srv/vaults`** / **`.stfolder`**). Detail: **`docs/setup-and-operations.md`** → *Syncthing (Docker)*.
+6. In Syncthing’s UI, folder path **`/srv/vaults/<name>`** (same path in container and on host).
+7. Cron: `./vps/install-cron.sh <vault-name>`.
 
 Emergency one-shot: **`CORPUS_SYNC_FORCE=1`** on `sync-loop` bypasses Syncthing skips (still uses trap cleanup for `.corpus-git-in-progress`).
 

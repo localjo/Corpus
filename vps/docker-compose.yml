@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     network_mode: host
     environment:
+      # Syncthing runs as this uid/gid inside the container — host /srv/vaults must be writable (see docs/setup-and-operations.md).
       - PUID=1000
       - PGID=1000
     volumes:

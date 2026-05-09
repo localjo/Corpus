@@ -16,12 +16,67 @@ Manual private repo creation per vault + SSH deploy key (or HTTPS + PAT).
 
 ## Syncthing (Docker)
 
+### Start
+
 ```bash
 cd /opt/Corpus/vps
 docker compose up -d
 ```
 
-In the Syncthing UI, add a folder whose path is **`/srv/vaults/<vault-name>`** — `docker-compose.yml` binds host **`/srv/vaults`** to the **same** path inside the container, so it matches `init-vault.sh` and cron. If you previously used **`/var/syncthing/vaults/...`**, change the folder path in the UI (or remove and re-add) after updating compose. Share with Mac/iPhone — **nothing else required** for Corpus locking: per [Syncthing’s “Temporary files”](https://docs.syncthing.net/users/syncing.html), in-flight pulls write **`basename.tmp`** files prefixed **`\.syncthing.`** or **`~syncthing~`**; unresolved [conflicts](https://docs.syncthing.net/users/syncing.html) use **`basename.sync-conflict-…`** (or a leading **`\.sync-conflict-…`**). **`sync-loop` skips commits only for those**, not for other reserved-namespace names without **`.tmp`** (e.g. a stray **`\.syncthing.notes.md`** Syncthing would ignore anyway).
+After changing **`vps/docker-compose.yml`** (volumes, `PUID`, etc.), recreate the container so the new mounts apply:
+
+```bash
+cd /opt/Corpus/vps && docker compose up -d --force-recreate
+```
+
+### Host ownership (do this before expecting sync to work)
+
+The image runs Syncthing as **`PUID` / `PGID`** from compose (default **`1000:1000`** in `vps/docker-compose.yml`). Inside the container that user must be able to **create subdirectories of `/srv/vaults`** and write the **`.stfolder`** marker inside each shared vault.
+
+If `init-vault.sh` or `mkdir` ran as **root**, the tree is often **`root:root`** and Syncthing **cannot** write — you see **`permission denied`** on **`mkdir /srv/vaults`**, **`.stfolder`**, or similar.
+
+**On the VPS host** (match `PUID`/`PGID` if you changed them in compose):
+
+```bash
+sudo mkdir -p /srv/vaults
+sudo chown -R 1000:1000 /srv/vaults
+```
+
+For a single vault after the fact:
+
+```bash
+sudo chown -R 1000:1000 /srv/vaults/<vault-name>
+```
+
+**Cron note:** `sync-loop` is often run as **root** via cron; root can still read/write a vault owned by **1000**. If git runs as a **non-root** deploy user, align ownership or use a shared group and `chmod g+rwX` so both that user and UID **1000** can update the repo.
+
+### Folder path in the Syncthing UI
+
+Use **`/srv/vaults/<vault-name>`**. `docker-compose.yml` binds host **`/srv/vaults`** to the **same** path in the container (not `/var/syncthing/vaults/...`), so it matches `init-vault.sh` and cron.
+
+If you ever used an older layout (`/var/syncthing/vaults/...` in the UI), change the folder path (or remove and re-add) after updating compose, then **Recreate** as above.
+
+### Troubleshooting (common log lines)
+
+| Symptom | Likely cause |
+|---------|-------------|
+| `mkdir /srv/vaults`: permission denied | Bind mount not active (run **`docker compose up -d --force-recreate`**). Or host **`/srv/vaults`** not writable by Syncthing’s UID (default **1000**): use **Host ownership** above. |
+| `mkdir …/.stfolder`: permission denied | Vault directory owned by **root** or wrong UID. **`sudo chown -R 1000:1000 /srv/vaults/<vault-name>`** on the host. |
+
+**Sanity checks:**
+
+```bash
+cd /opt/Corpus/vps && docker compose ps
+docker exec syncthing id
+docker exec syncthing ls -la /srv/vaults
+docker compose config   # confirm volumes include /srv/vaults:/srv/vaults
+```
+
+You want **`syncthing` / UID `1000`** (unless you changed `PUID`) and **`ls`** inside the container to show your vault directories.
+
+### Corpus locking (nothing extra in Syncthing config)
+
+Share the folder with Mac/iPhone — no Folder ID or custom ignore rules required for Corpus. Per [Syncthing “Temporary files”](https://docs.syncthing.net/users/syncing.html), in-flight pulls use **`basename.tmp`** with prefixes **`\.syncthing.`** or **`~syncthing~`**; [conflicts](https://docs.syncthing.net/users/syncing.html) use **`*.sync-conflict-*`** / **`.sync-conflict-*`**. **`sync-loop` skips commits only for those** patterns, not for other **`\.syncthing.*`** names without **`.tmp`** (e.g. a stray **`\.syncthing.notes.md`** Syncthing would ignore anyway).
 
 ## Vault bootstrap
 
@@ -29,6 +84,8 @@ In the Syncthing UI, add a folder whose path is **`/srv/vaults/<vault-name>`** �
 /opt/Corpus/scripts/init-vault.sh git@github.com:you/repo.git
 git -C /srv/vaults/<repo-base> push origin main
 ```
+
+Then ensure Syncthing can write the vault tree (see **Host ownership** above), especially if **`init-vault.sh`** was run with **`sudo`**.
 
 ## Cron
 
