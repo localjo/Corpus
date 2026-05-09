@@ -38,9 +38,7 @@ For each vault:
 2. Bootstrap a vault repo:
 
 ```bash
-./scripts/init-vault.sh \
-  --repo git@github.com:you/my-vault.git \
-  --vault-dir /srv/vaults/my-vault
+./scripts/init-vault.sh git@github.com:you/my-vault.git
 ```
 
 3. Configure Syncthing folder for `/srv/vaults/my-vault` and devices.

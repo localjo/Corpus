@@ -2,59 +2,59 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 --repo <git-url> --vault-dir <path> [--vault-label <label>] [--branch <name>]"
+  echo "Usage: $0 <repo-url>"
+  echo
+  echo "Fixed defaults:"
+  echo "  Parent dir:   /srv/vaults"
+  echo "  Branch:       main"
   exit 1
 }
 
-REPO_URL=""
-VAULT_DIR=""
-VAULT_LABEL=""
+[[ $# -eq 1 ]] || usage
+REPO_URL="$1"
+
+PARENT_DIR="/srv/vaults"
 BRANCH="main"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE_DIR="$ROOT_DIR/templates/vault"
 
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --repo)
-      REPO_URL="${2:-}"
-      shift 2
-      ;;
-    --vault-dir)
-      VAULT_DIR="${2:-}"
-      shift 2
-      ;;
-    --vault-label)
-      VAULT_LABEL="${2:-}"
-      shift 2
-      ;;
-    --branch)
-      BRANCH="${2:-}"
-      shift 2
-      ;;
-    *)
-      usage
-      ;;
-  esac
-done
+repo_basename="$(basename "$REPO_URL")"
+VAULT_NAME="${repo_basename%.git}"
+[[ "$VAULT_NAME" =~ ^[a-zA-Z0-9._-]+$ ]] || {
+  echo "Could not derive safe vault name from repo URL: $REPO_URL" >&2
+  exit 1
+}
 
-[[ -n "$REPO_URL" && -n "$VAULT_DIR" ]] || usage
+VAULT_DIR="${PARENT_DIR}/${VAULT_NAME}"
+VAULT_LABEL="$VAULT_NAME"
 
 if [[ ! -d "$VAULT_DIR/.git" ]]; then
-  git clone --branch "$BRANCH" "$REPO_URL" "$VAULT_DIR"
+  mkdir -p "$PARENT_DIR"
+  git clone "$REPO_URL" "$VAULT_DIR"
 fi
 
-if [[ -z "$VAULT_LABEL" ]]; then
-  VAULT_LABEL="$(basename "$VAULT_DIR")"
+if git -C "$VAULT_DIR" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  git -C "$VAULT_DIR" checkout "$BRANCH"
+else
+  git -C "$VAULT_DIR" checkout -b "$BRANCH"
 fi
 
 mkdir -p "$VAULT_DIR/raw" "$VAULT_DIR/wiki" "$VAULT_DIR/.obsidian"
 
-cp -f "$TEMPLATE_DIR/manifest.json" "$VAULT_DIR/manifest.json"
-cp -f "$TEMPLATE_DIR/.gitignore.tmpl" "$VAULT_DIR/.gitignore"
-cp -f "$TEMPLATE_DIR/wiki/index.md.tmpl" "$VAULT_DIR/wiki/index.md"
+if [[ ! -f "$VAULT_DIR/manifest.json" ]]; then
+  cp -f "$TEMPLATE_DIR/manifest.json" "$VAULT_DIR/manifest.json"
+fi
+if [[ ! -f "$VAULT_DIR/.gitignore" ]]; then
+  cp -f "$TEMPLATE_DIR/.gitignore.tmpl" "$VAULT_DIR/.gitignore"
+fi
+if [[ ! -f "$VAULT_DIR/wiki/index.md" ]]; then
+  cp -f "$TEMPLATE_DIR/wiki/index.md.tmpl" "$VAULT_DIR/wiki/index.md"
+fi
 
-sed "s/{{VAULT_LABEL}}/$VAULT_LABEL/g" "$TEMPLATE_DIR/CLAUDE.md.tmpl" > "$VAULT_DIR/CLAUDE.md"
+if [[ ! -f "$VAULT_DIR/CLAUDE.md" ]]; then
+  sed "s/{{VAULT_LABEL}}/$VAULT_LABEL/g" "$TEMPLATE_DIR/CLAUDE.md.tmpl" > "$VAULT_DIR/CLAUDE.md"
+fi
 
 "$ROOT_DIR/scripts/install-skills.sh" --vault-dir "$VAULT_DIR"
 
@@ -65,4 +65,5 @@ if ! git -C "$VAULT_DIR" diff --cached --quiet; then
 fi
 
 echo "Vault initialized at $VAULT_DIR"
+echo "Remote: $REPO_URL"
 echo "Next: git -C \"$VAULT_DIR\" push origin \"$BRANCH\""

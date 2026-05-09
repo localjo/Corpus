@@ -34,22 +34,20 @@ Then in Syncthing UI:
 ## 4) Bootstrap a vault
 
 ```bash
-./scripts/init-vault.sh \
-  --repo git@github.com:you/my-vault.git \
-  --vault-dir /srv/vaults/my-vault
+./scripts/init-vault.sh git@github.com:you/my-vault.git
 ```
 
 What this does:
 
-- Clones the already-created remote repo.
-- Creates/updates `raw/`, `wiki/index.md`, `manifest.json`, `CLAUDE.md`, `.gitignore`.
+- Derives vault name from repo URL and clones into `/srv/vaults/<repo-name>`.
+- Creates missing `raw/`, `wiki/index.md`, `manifest.json`, `CLAUDE.md`, `.gitignore` without overwriting existing vault content.
 - Copies skills to `.claude/skills/`.
 - Creates bootstrap commit with starter files and skills staged.
 
 Push bootstrap commit:
 
 ```bash
-git -C /srv/vaults/my-vault push origin main
+git -C /srv/vaults/<repo-name> push origin main
 ```
 
 ## 5) Install cron sync loop
