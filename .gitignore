@@ -1,0 +1,12 @@
+# OS/editor noise
+.DS_Store
+
+# Local environment overrides (keep example tracked)
+vps/.env
+
+# Runtime Syncthing state created by compose volume mapping
+vps/syncthing/config/
+
+# Optional local logs/temp
+*.log
+*.tmp

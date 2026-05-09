@@ -1,0 +1,24 @@
+# {{VAULT_LABEL}} Vault
+
+This vault follows the Karpathy LLM Wiki pattern with `raw/` as source inputs and `wiki/` as curated outputs.
+Shared operational behavior is defined by the installed skills in `.claude/skills/`.
+
+## Manifest
+
+`manifest.json` is required and tracked. Schema: `{"version":1,"sources":[{"filename":"raw/foo.md","wiki_pages":["concepts/bar.md"],"ingested_at":"2026-05-01T14:32:00Z"}]}`. `filename` is vault-root-relative, `wiki_pages` are relative to `wiki/` (no `wiki/` prefix), and `ingested_at` must be ISO 8601 UTC.
+
+## Formatting rules
+
+- In markdown table cells, if a wikilink display label contains `|`, escape it as `\|`.
+
+## Vault-specific scope
+
+- Add domain-specific scope constraints here.
+
+## Vault-specific boundaries
+
+- Add folder and process constraints here.
+
+## Vault-specific style and taxonomy
+
+- Add page-type taxonomy, frontmatter requirements, and style constraints here.
