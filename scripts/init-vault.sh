@@ -20,6 +20,11 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE_DIR="$ROOT_DIR/templates/vault"
 ENV_FILE="$ROOT_DIR/vps/.env"
 
+if [[ ! -f "$ENV_FILE" ]]; then
+  cp "$ROOT_DIR/vps/.env.example" "$ENV_FILE"
+  chmod 600 "$ENV_FILE" 2>/dev/null || true
+fi
+
 repo_basename="$(basename "$REPO_URL")"
 VAULT_NAME="${repo_basename%.git}"
 [[ "$VAULT_NAME" =~ ^[a-zA-Z0-9._-]+$ ]] || {
@@ -78,3 +83,4 @@ echo "Vault initialized at $VAULT_DIR"
 echo "Remote: $REPO_URL"
 echo "Next: git -C \"$VAULT_DIR\" push origin \"$BRANCH\""
 echo "Then: /opt/Corpus/vps/install-cron.sh \"$VAULT_NAME\""
+echo "(Sync webhook, if installed, picks up this vault automatically — no per-vault step.)"

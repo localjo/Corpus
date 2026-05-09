@@ -27,14 +27,16 @@ On the VPS: `git`, `bash`, `curl`, `cron`, `flock`, `find`, `rg` (ripgrep — us
 1. Clone this repo on the VPS (`/opt/Corpus`).
 2. Set author in `/opt/Corpus/vps/.env` (see `vps/.env.example`).
 3. Start Syncthing: `cd /opt/Corpus/vps && cp .env.example .env && docker compose up -d`.
-4. Bootstrap a vault: `./scripts/init-vault.sh git@github.com:you/my-vault.git`
+4. Bootstrap a vault: `./scripts/init-vault.sh git@github.com:you/my-vault.git` (creates **`vps/.env`** from **`.env.example`** if missing).
 5. Let Syncthing’s container user own the vault tree (default **`PUID`/`PGID` `1000`** in **`vps/docker-compose.yml`**): **`sudo chown -R 1000:1000 /srv/vaults`** (avoids **`permission denied`** on **`/srv/vaults`** / **`.stfolder`**). Detail: **`docs/setup-and-operations.md`** → *Syncthing (Docker)*.
 6. In Syncthing’s UI, folder path **`/srv/vaults/<name>`** (same path in container and on host).
-7. Cron: `./vps/install-cron.sh <vault-name>` (registers **`safe.directory`** for that vault for the cron user; **`sync-loop`** also trusts `--vault-dir` per run via **`GIT_CONFIG_*`** — see docs).
+7. Cron: `./vps/install-cron.sh <vault-name>` (default every **5** minutes; **`install-cron`** also sets **`safe.directory`** for the cron user; **`sync-loop`** trusts **`--vault-dir`** per run).
 
-Emergency one-shot: **`CORPUS_SYNC_FORCE=1`** on `sync-loop` bypasses Syncthing skips (still uses trap cleanup for `.corpus-git-in-progress`).
+Emergency one-shot: **`CORPUS_SYNC_FORCE=1`** on **`sync-loop`** bypasses Syncthing skips.
 
-Optional **`SYNCTHING_PAUSE_FOR_GIT=1`** + API key calls **`POST /rest/system/pause`** for the git window (`resume` on exit); a serial **`flock`** avoids overlapping vault crons stepping on pause/resume. Often unnecessary — see **`docs/setup-and-operations.md`**.
+Optional **`SYNCTHING_PAUSE_FOR_GIT=1`** — see **`docs/setup-and-operations.md`** and **`vps/.env.example`**.
+
+**Sync webhook (optional):** HTTP on **`127.0.0.1:8780`** runs the same **`sync-loop`** as cron — **`POST /sync/<vault>`** with Bearer (e.g. Claude) and **`POST /hooks/github`** for pushes on **`main`**. One-time global install (vaults under **`/srv/vaults`** are auto-discovered): **`sudo /opt/Corpus/vps/install-sync-webhook.sh`** — see **`docs/setup-and-operations.md`**.
 
 ## Vault conventions
 

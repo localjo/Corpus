@@ -1,0 +1,29 @@
+# Installed by vps/install-sync-webhook.sh as /etc/systemd/system/corpus-sync-webhook.service.
+#
+# Same EnvironmentFile as sync-loop / docker-compose (vps/.env). Mode 0600 recommended.
+
+[Unit]
+Description=Corpus on-demand sync webhook (Corpus sync_webhook.py)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/Corpus/vps
+EnvironmentFile=/opt/Corpus/vps/.env
+ExecStart=/usr/bin/python3 /opt/Corpus/vps/sync_webhook.py
+Restart=on-failure
+RestartSec=5
+
+# Hardening — listener binds 127.0.0.1 only and runs sync-loop on /srv/vaults.
+# PrivateTmp is intentionally NOT set: per-vault flock(2) on /tmp/corpus-sync-<vault>.lock
+# must be visible to install-cron's flock(1) so cron + webhook serialize cleanly.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/vaults /opt/Corpus /tmp
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

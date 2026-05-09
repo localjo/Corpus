@@ -10,3 +10,7 @@ vps/syncthing/config/
 # Optional local logs/temp
 *.log
 *.tmp
+
+# Python bytecode (merge_webhook_env.py, sync_webhook.py, etc.)
+__pycache__/
+*.py[cod]
