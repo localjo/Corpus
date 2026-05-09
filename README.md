@@ -35,14 +35,15 @@ For each vault:
 ## Quick start
 
 1. Create a local clone of this tooling repo on VPS.
-2. Bootstrap a vault repo:
+2. Set commit identity (either global git config or `vps/.env` author fields).
+3. Bootstrap a vault repo:
 
 ```bash
 ./scripts/init-vault.sh git@github.com:you/my-vault.git
 ```
 
-3. Configure Syncthing folder for `/srv/vaults/my-vault` and devices.
-4. Install cron entry:
+1. Configure Syncthing folder for `/srv/vaults/my-vault` and devices.
+1. Install cron entry:
 
 ```bash
 ./vps/install-cron.sh \

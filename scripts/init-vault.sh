@@ -18,6 +18,7 @@ BRANCH="main"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEMPLATE_DIR="$ROOT_DIR/templates/vault"
+ENV_FILE="$ROOT_DIR/vps/.env"
 
 repo_basename="$(basename "$REPO_URL")"
 VAULT_NAME="${repo_basename%.git}"
@@ -28,6 +29,14 @@ VAULT_NAME="${repo_basename%.git}"
 
 VAULT_DIR="${PARENT_DIR}/${VAULT_NAME}"
 VAULT_LABEL="$VAULT_NAME"
+
+if [[ -f "$ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+fi
+
+GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-Corpus Bot}"
+GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-corpus-bot@example.com}"
 
 if [[ ! -d "$VAULT_DIR/.git" ]]; then
   mkdir -p "$PARENT_DIR"
@@ -61,7 +70,8 @@ fi
 git -C "$VAULT_DIR" add raw wiki manifest.json CLAUDE.md .gitignore .claude/skills
 
 if ! git -C "$VAULT_DIR" diff --cached --quiet; then
-  git -C "$VAULT_DIR" commit -m "Bootstrap vault with templates and shared skills"
+  git -C "$VAULT_DIR" -c user.name="$GIT_AUTHOR_NAME" -c user.email="$GIT_AUTHOR_EMAIL" \
+    commit -m "Bootstrap vault with templates and shared skills"
 fi
 
 echo "Vault initialized at $VAULT_DIR"

@@ -33,6 +33,20 @@ Then in Syncthing UI:
 
 ## 4) Bootstrap a vault
 
+Before first bootstrap commit, set git identity (one-time on VPS):
+
+```bash
+git config --global user.name "Corpus Sync Bot"
+git config --global user.email "corpus-bot@yourdomain.com"
+```
+
+Alternative (preferred for this repo): define in `/opt/Corpus/vps/.env`:
+
+```bash
+GIT_AUTHOR_NAME=Corpus Sync Bot
+GIT_AUTHOR_EMAIL=corpus-bot@yourdomain.com
+```
+
 ```bash
 ./scripts/init-vault.sh git@github.com:you/my-vault.git
 ```
