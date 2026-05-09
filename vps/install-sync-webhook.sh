@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # One-time global install for the Corpus sync webhook (corpus-sync-webhook.service).
 #
-# Idempotent: ensures CORPUS_SYNC_WEBHOOK_SECRET and CORPUS_GITHUB_WEBHOOK_SECRET
-# are set in vps/.env (auto-generates with secrets.token_hex(32) when missing),
-# then installs / restarts the systemd unit when run as root.
+# Idempotent: ensures CORPUS_GITHUB_WEBHOOK_SECRET is set in vps/.env (auto-generates
+# with secrets.token_hex(32) when missing), then installs / restarts the systemd unit
+# when run as root.
+#
+# /sync/<vault> is unauthenticated — vault basename is the path component, sync-loop
+# is idempotent, and the per-vault flock returns 503 on concurrent calls (rate limit).
+# Only /hooks/github needs an HMAC secret.
 #
 # Vaults are auto-discovered from /srv/vaults at request time — no per-vault step.
 #
@@ -59,7 +63,6 @@ except OSError:
 PY
 }
 
-ensure_secret CORPUS_SYNC_WEBHOOK_SECRET
 ensure_secret CORPUS_GITHUB_WEBHOOK_SECRET
 
 if [[ "$(id -u)" -ne 0 ]]; then

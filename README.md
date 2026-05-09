@@ -36,7 +36,7 @@ Emergency one-shot: **`CORPUS_SYNC_FORCE=1`** on **`sync-loop`** bypasses Syncth
 
 Optional **`SYNCTHING_PAUSE_FOR_GIT=1`** — see **`docs/setup-and-operations.md`** and **`vps/.env.example`**.
 
-**Sync webhook (optional):** HTTP on **`127.0.0.1:8780`** runs the same **`sync-loop`** as cron — **`POST /sync/<vault>`** with Bearer (e.g. Claude) and **`POST /hooks/github`** for pushes on **`main`**. One-time global install (vaults under **`/srv/vaults`** are auto-discovered): **`sudo /opt/Corpus/vps/install-sync-webhook.sh`** — see **`docs/setup-and-operations.md`**.
+**Sync webhook (optional):** HTTP on **`127.0.0.1:8780`** runs the same **`sync-loop`** as cron — **`POST /sync/<vault>`** (unauthenticated; idempotent + per-vault flock rate limit) for agents to flush on demand, and **`POST /hooks/github`** (HMAC) for pushes on **`main`**. One-time global install (vaults under **`/srv/vaults`** are auto-discovered): **`sudo /opt/Corpus/vps/install-sync-webhook.sh`** — see **`docs/setup-and-operations.md`**.
 
 ## Vault conventions
 

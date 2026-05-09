@@ -2,28 +2,31 @@
 """
 On-demand vault sync over HTTP — runs the SAME sync-loop.sh as cron.
 
-Two endpoints, both block until sync-loop exits:
+Two endpoints, both delegate to sync-loop.sh (idempotent: commit + pull --rebase + push):
 
   POST /sync/<vault>
-    Authorization: Bearer <CORPUS_SYNC_WEBHOOK_SECRET>
-    Use: Claude / operators trigger a sync before reading or after writing,
-    and wait for {"ok": true, "sync_completed": true} before proceeding.
+    No auth. Vault basename is the path; access control is the path itself plus
+    a non-blocking per-vault flock that returns 503 (Retry-After: 5) when a sync
+    is already in progress for that vault — natural rate limit, no queueing.
+    Returns {"ok": true, "sync_completed": true} on success.
+    Use: agents (e.g. Claude Code in cloud) trigger a sync before reading or
+    after writing. Caller waits for sync_completed before proceeding.
 
   POST /hooks/github
     X-GitHub-Event: push (refs/heads/main only)
     X-Hub-Signature-256: sha256=<hex>
+    Blocks on the same per-vault lock so GitHub bursts serialize cleanly.
     Use: GitHub redelivery on every push.
 
 Vaults are discovered automatically:
-  - Bearer endpoint accepts any directory under /srv/vaults that is a git repo.
-  - GitHub endpoint maps `repository.full_name` to a vault by reading each
+  - /sync/<vault> accepts any directory under /srv/vaults that is a git repo.
+  - /hooks/github maps `repository.full_name` to a vault by reading each
     vault's `origin` URL from .git/config — no CORPUS_GITHUB_REPO_MAP needed.
 
 GET /healthz reports which modes are enabled (agent_sync / github_push_webhook).
 
-Env (at least one of the two secrets is required):
-  CORPUS_SYNC_WEBHOOK_SECRET   — Bearer for POST /sync/<vault>
-  CORPUS_GITHUB_WEBHOOK_SECRET — GitHub HMAC
+Env:
+  CORPUS_GITHUB_WEBHOOK_SECRET — required only when /hooks/github is used (HMAC).
 
 Bind/port/parent are intentionally hardcoded:
   127.0.0.1:8780 / /srv/vaults / refs/heads/main
@@ -128,13 +131,6 @@ def find_vault_for_repo(repo_full_name: str) -> str | None:
     return None
 
 
-def bearer_ok(got: str, want: str) -> bool:
-    gb, wb = got.encode("utf-8"), want.encode("utf-8")
-    if len(gb) != len(wb):
-        return False
-    return hmac.compare_digest(gb, wb)
-
-
 def github_sig_ok(secret: str, payload: bytes, sig_header: str | None) -> bool:
     if not sig_header or not sig_header.startswith("sha256="):
         return False
@@ -146,16 +142,7 @@ def github_sig_ok(secret: str, payload: bytes, sig_header: str | None) -> bool:
 
 
 def main() -> None:
-    bearer_secret = os.environ.get("CORPUS_SYNC_WEBHOOK_SECRET", "").strip()
     gh_secret = os.environ.get("CORPUS_GITHUB_WEBHOOK_SECRET", "").strip()
-
-    if not bearer_secret and not gh_secret:
-        print(
-            "Need at least one of CORPUS_SYNC_WEBHOOK_SECRET (Bearer) "
-            "or CORPUS_GITHUB_WEBHOOK_SECRET (GitHub).",
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
     sync_loop = SCRIPT_DIR / "sync-loop.sh"
     if not sync_loop.is_file():
@@ -165,9 +152,7 @@ def main() -> None:
     env_file = SCRIPT_DIR / ".env"
 
     if env_bool("CORPUS_SYNC_WEBHOOK_SYNTAX_ONLY"):
-        modes = []
-        if bearer_secret:
-            modes.append("bearer /sync")
+        modes = ["unauth /sync"]
         if gh_secret:
             modes.append("github /hooks/github")
         print(f"CORPUS_SYNC_WEBHOOK_SYNTAX_ONLY=1 OK — {', '.join(modes)}", file=sys.stderr)
@@ -189,14 +174,22 @@ def main() -> None:
             self.end_headers()
             self.wfile.write(body)
 
-        def _run_sync(self, vault: str) -> subprocess.CompletedProcess[str]:
-            # Blocking exclusive lock per vault — interoperates with cron's flock(1) on the
-            # same path. Multiple concurrent webhook requests for the same vault serialize
-            # rather than fail-fast, so callers always get a definitive sync_completed.
+        def _run_sync(
+            self, vault: str, *, blocking: bool
+        ) -> subprocess.CompletedProcess[str] | None:
+            # Per-vault flock interoperates with cron's flock(1) on the same path.
+            #   blocking=True (GitHub): wait for the lock so push bursts serialize cleanly.
+            #   blocking=False (/sync): if a sync is already in flight, return None so the
+            #     handler can answer 503 — this is the per-vault rate limit for the
+            #     unauthenticated path.
             lock_path = LOCK_DIR / f"corpus-sync-{vault}.lock"
             fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT, 0o600)
             try:
-                fcntl.flock(fd, fcntl.LOCK_EX)
+                flags = fcntl.LOCK_EX if blocking else (fcntl.LOCK_EX | fcntl.LOCK_NB)
+                try:
+                    fcntl.flock(fd, flags)
+                except BlockingIOError:
+                    return None
                 argv = [
                     str(sync_loop),
                     "--vault-dir",
@@ -231,22 +224,28 @@ def main() -> None:
             self._json(200, {"ok": True, "sync_completed": True})
 
         def _sync_endpoint(self) -> None:
-            if not bearer_secret:
-                self._json(503, {"ok": False, "sync_completed": False, "error": "agent_sync_disabled"})
-                return
-            auth = self.headers.get("Authorization") or ""
-            bearer = auth[7:].strip() if auth.casefold().startswith("bearer ") else ""
-            if not bearer:
-                bearer = (self.headers.get("X-Corpus-Webhook-Secret") or "").strip()
-            if not bearer_ok(bearer, bearer_secret):
-                self._json(401, {"ok": False, "sync_completed": False, "error": "unauthorized"})
-                return
+            # Unauthenticated. Threat model: vault basename is the path component;
+            # sync-loop is idempotent (worst case: extra git fetches). Concurrent
+            # callers for the same vault hit the non-blocking flock and get a 503,
+            # which caps the per-vault request rate at ~1 per sync-loop runtime.
             path = urlparse(self.path).path.rstrip("/")
             vault = path[len("/sync/") :].split("/", maxsplit=1)[0]
             if not vault or not is_valid_vault(vault):
                 self._json(404, {"ok": False, "sync_completed": False, "error": "vault_unknown"})
                 return
-            self._respond_after_sync(self._run_sync(vault))
+            proc = self._run_sync(vault, blocking=False)
+            if proc is None:
+                body = json.dumps(
+                    {"ok": False, "sync_completed": False, "skipped": "busy"}
+                ).encode("utf-8")
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Retry-After", "5")
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            self._respond_after_sync(proc)
 
         def _github_endpoint(self) -> None:
             if not gh_secret:
@@ -298,7 +297,7 @@ def main() -> None:
             if not vault:
                 self._json(200, {"ok": True, "sync_completed": False, "skipped": "no_vault_for_repo"})
                 return
-            self._respond_after_sync(self._run_sync(vault))
+            self._respond_after_sync(self._run_sync(vault, blocking=True))
 
         def do_POST(self) -> None:  # noqa: N802 — stdlib
             path = urlparse(self.path).path.rstrip("/").casefold() or "/"
@@ -314,9 +313,7 @@ def main() -> None:
         def do_GET(self) -> None:  # noqa: N802
             slug = urlparse(self.path).path.strip("/").casefold()
             if slug in {"", "health", "healthz"}:
-                cap: dict[str, object] = {"ok": True}
-                if bearer_secret:
-                    cap["agent_sync"] = True
+                cap: dict[str, object] = {"ok": True, "agent_sync": True}
                 if gh_secret:
                     cap["github_push_webhook"] = True
                 self._json(200, cap)
@@ -325,9 +322,7 @@ def main() -> None:
             self.end_headers()
 
     httpd = ThreadingHTTPServer((LISTEN_BIND, LISTEN_PORT), Handler)
-    modes = []
-    if bearer_secret:
-        modes.append("POST /sync/<vault>")
+    modes = ["POST /sync/<vault> (unauth)"]
     if gh_secret:
         modes.append("POST /hooks/github")
     print(

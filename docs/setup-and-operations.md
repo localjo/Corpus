@@ -108,8 +108,8 @@ flock -n /tmp/corpus-sync-<vault-basename>.lock \
 
 A small Python listener on **`127.0.0.1:8780`** runs the same **`sync-loop`** as cron, on demand:
 
-- **`POST /sync/<vault>`** with **`Authorization: Bearer <CORPUS_SYNC_WEBHOOK_SECRET>`** — Claude / operators trigger a sync and block on **`{"ok": true, "sync_completed": true}`** before reading or after writing.
-- **`POST /hooks/github`** with **`X-Hub-Signature-256`** — GitHub triggers a sync on every push to **`refs/heads/main`**.
+- **`POST /sync/<vault>`** — **unauthenticated.** The vault basename is the path; **`sync-loop`** is idempotent (worst case is an extra `git fetch`); a non-blocking per-vault flock returns **`503` `Retry-After: 5`** when a sync is already in flight, so concurrent calls cap the per-vault rate at ~1 per `sync-loop` run. Used by agents that cannot hold a secret (e.g. Claude Code in cloud) to flush on demand.
+- **`POST /hooks/github`** with **`X-Hub-Signature-256`** — GitHub triggers a sync on every push to **`refs/heads/main`**, signed with **`CORPUS_GITHUB_WEBHOOK_SECRET`**. This is the **only** signed entry point.
 
 Vaults are auto-discovered from **`/srv/vaults/*/.git/`**, so there is **no per-vault config**. Once the listener is installed, every vault under **`/srv/vaults`** is reachable by basename and routed by **`origin`** URL for GitHub events. Skip this section entirely if cron alone is enough.
 
@@ -122,12 +122,12 @@ sudo /opt/Corpus/vps/install-sync-webhook.sh
 Idempotent. This:
 
 - Creates **`vps/.env`** from **`vps/.env.example`** if missing (mode 0600).
-- Generates **`CORPUS_SYNC_WEBHOOK_SECRET`** and **`CORPUS_GITHUB_WEBHOOK_SECRET`** with **`secrets.token_hex(32)`** if either is missing or empty (existing values are preserved).
-- Installs **`corpus-sync-webhook.service`** and **(re)starts** it.
+- Generates **`CORPUS_GITHUB_WEBHOOK_SECRET`** with **`secrets.token_hex(32)`** if missing or empty (existing value preserved).
+- Installs **`corpus-sync-webhook.service`** and **(re)starts** it; copies a fresh unit on each run when the file content changed.
 
-Re-run any time after editing **`vps/.env`** to roll-restart the unit. Without **`sudo`** the script only ensures the secrets — no systemd changes.
+Re-run any time after editing **`vps/.env`** or pulling a new Corpus version. Without **`sudo`** the script only ensures the secret — no systemd changes.
 
-Logs: **`journalctl -u corpus-sync-webhook -f`**. Smoke: **`curl -sSf http://127.0.0.1:8780/healthz`** returns **`{"ok": true, "agent_sync": true, "github_push_webhook": true}`** when both modes are enabled. Syntax-only sanity check (no port binding):
+Logs: **`journalctl -u corpus-sync-webhook -f`**. Smoke: **`curl -sSf http://127.0.0.1:8780/healthz`** returns **`{"ok": true, "agent_sync": true, "github_push_webhook": true}`**. Syntax-only sanity check (no port binding):
 
 ```bash
 cd /opt/Corpus/vps && set -a && . ./.env && set +a && \
@@ -136,16 +136,42 @@ cd /opt/Corpus/vps && set -a && . ./.env && set +a && \
 
 ### **Adding more vaults**
 
-Run **`scripts/init-vault.sh git@github.com:owner/<name>.git`**, register cron with **`vps/install-cron.sh <name>`** (optional but recommended as a fallback), and the listener picks up **`/srv/vaults/<name>`** at the next request — no listener restart, no env edit.
+Run **`scripts/init-vault.sh git@github.com:owner/<name>.git`**, register cron with **`vps/install-cron.sh <name>`** (recommended as a steady-state fallback), and the listener picks up **`/srv/vaults/<name>`** at the next request — no listener restart, no env edit.
+
+### **Public exposure (Caddy / nginx / tunnel)**
+
+GitHub cannot reach **`127.0.0.1:8780`** directly, and you'll usually want **`/sync/*`** reachable to agents on the public internet. Front the listener with an HTTPS endpoint and forward **`/hooks/github`** + **`/sync/*`** only — keep **`/healthz`** private.
+
+Caddyfile snippet (replace the host with your subdomain):
+
+```
+corpus.example.com {
+	@public path /hooks/github /sync/*
+	handle @public {
+		reverse_proxy 127.0.0.1:8780
+	}
+	handle {
+		respond 404
+	}
+}
+```
+
+`reload caddy`, then verify from any machine:
+
+```bash
+curl -sS -o /dev/null -w "%{http_code}\n" -X POST https://corpus.example.com/hooks/github
+# → 401  (no signature on purpose; means the public path reaches the listener)
+
+curl -sS -o /dev/null -w "%{http_code}\n" https://corpus.example.com/healthz
+# → 404  (intentionally not exposed)
+```
 
 ### **GitHub (per repository)**
 
-GitHub cannot reach **`127.0.0.1:8780`** directly — front the listener with an HTTPS endpoint (Cloudflare Tunnel, Tailscale Funnel, Caddy / nginx on the VPS, SSH reverse tunnel, etc.) that forwards to **`http://127.0.0.1:8780/hooks/github`** on the VPS.
-
-Then for each repo whose vault should auto-sync:
+For each repo whose vault should auto-sync:
 
 1. **Settings** → **Webhooks** → **Add webhook**.
-2. **Payload URL**: your public HTTPS URL ending in **`/hooks/github`**.
+2. **Payload URL**: your public HTTPS URL ending in **`/hooks/github`** (e.g. **`https://corpus.example.com/hooks/github`**).
 3. **Content type**: **`application/json`**.
 4. **Secret**: paste the value of **`CORPUS_GITHUB_WEBHOOK_SECRET`** from **`vps/.env`** (one secret for **every** Corpus-managed repo behind this VPS).
 5. **Events**: just push events — only **`refs/heads/main`** triggers a sync; others return **`skipped: "wrong_ref"`** with **200**.
@@ -153,27 +179,21 @@ Then for each repo whose vault should auto-sync:
 
 The listener routes each delivery to the vault under **`/srv/vaults/`** whose **`.git/config`** **`origin`** URL matches **`repository.full_name`**. If you rotate **`CORPUS_GITHUB_WEBHOOK_SECRET`**, update each GitHub webhook **and** **`sudo systemctl restart corpus-sync-webhook`**.
 
-### **Claude / operators (Bearer)**
+### **Agents / operators (`POST /sync/<vault>`)**
 
-The listener binds **`127.0.0.1`** only. From a workstation:
-
-```bash
-ssh -N -L 127.0.0.1:8780:127.0.0.1:8780 YOUR_USER@YOUR_VPS
-```
-
-Then trigger a sync for any vault under **`/srv/vaults`**:
+No secret to manage. From any machine that can reach the public endpoint:
 
 ```bash
-curl -sSf -X POST \
-  -H "Authorization: Bearer YOUR_CORPUS_SYNC_WEBHOOK_SECRET" \
-  http://127.0.0.1:8780/sync/YOUR_VAULT_BASENAME
+curl -sSf -X POST https://corpus.example.com/sync/YOUR_VAULT_BASENAME
+# → {"ok": true, "sync_completed": true}
 ```
 
-(Header **`X-Corpus-Webhook-Secret: …`** is also accepted in place of Bearer.)
+**`200 sync_completed: true`** — `sync-loop` exited **0** (commit / pull --rebase / push).
+**`503 skipped: "busy"` + `Retry-After: 5`** — a sync for this vault is already in flight; retry shortly. The `Retry-After` value is conservative — most syncs finish in a second or two.
+**`502 exit: <n>`** — `sync-loop` itself failed; check **`journalctl -u corpus-sync-webhook`**.
+**`404 vault_unknown`** — the basename is not a directory under `/srv/vaults/` with a `.git/`.
 
-**`{"ok": true, "sync_completed": true}`** confirms **`sync-loop`** exited **0** (commit / pull --rebase / push). Concurrent requests for the same vault serialize on **`/tmp/corpus-sync-<vault>.lock`** — same lock as cron — so Claude always gets a definitive answer rather than a busy signal. Then **`git pull`** in any cloud clone to see GitHub. **`502`** with **`exit: <n>`** means **`sync-loop`** failed; check **`journalctl -u corpus-sync-webhook`**.
-
-For Claude Code / cloud workspaces that cannot SSH to the VPS, put a small authenticated reverse proxy in front of **`127.0.0.1:8780`** on the VPS (out of scope for Corpus).
+Threat model for the unauthenticated path: an attacker who learns a vault basename can cause repeated **idempotent** syncs (extra `git fetch`/`push` on the VPS). The 503 fast-fail bounds the rate to roughly one `sync-loop` runtime per vault. There is no read of vault contents over this path; sync-loop only manipulates git state. If that's not acceptable for your deployment, add Caddy basic auth or a path-scoped allowlist on the public site.
 
 ### Git “dubious ownership” (Syncthing `chown 1000` + cron as root)
 
