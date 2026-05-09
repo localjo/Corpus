@@ -9,71 +9,35 @@ Minimal tooling for a personal wiki workflow:
 
 ## What this repo provides
 
-- Vault bootstrap templates:
-  - `raw/`
-  - `wiki/index.md`
-  - `manifest.json`
-  - `CLAUDE.md`
-  - `.gitignore`
-- Shared skill files copied into each vault's `.claude/skills/`.
-- VPS scripts for:
-  - Syncthing with Docker Compose
-  - Per-vault cron sync loop (`commit -> pull --rebase -> push`)
-  - Optional webhook notifications
-  - `flock` lock to prevent overlapping cron runs
+- Vault bootstrap templates (`raw/`, `wiki/`, `manifest.json`, `CLAUDE.md`, `.gitignore`).
+- Shared skill files in `.claude/skills/` (copied into each vault).
+- **`vps/sync-loop.sh`**: cron-friendly `git` loop with **automatic** safeguards:
+  - Skips committing while Syncthing **pull temps** (`.syncthing.*.tmp` or `~syncthing~*.tmp`) exist, or while unresolved **conflict** files (`*.sync-conflict-*` or `.sync-conflict-*`) exist ([Syncthing docs](https://docs.syncthing.net/users/syncing.html)).
+  - Creates **`.corpus-git-in-progress`** for the lifetime of each run (visibility / hooks; not read by stock Syncthing).
+  - Cron entry uses per-vault **`flock -n`** so overlapping ticks skip instead of running two git loops on the same repo.
 
 ## Prerequisites
 
-For each vault:
+Per vault: private GitHub repo + VPS SSH access to git push.
 
-1. Create the private GitHub repository manually.
-2. Configure VPS auth for push access:
-   - Preferred: SSH deploy key
-   - Fallback: PAT over HTTPS
-3. Ensure `git`, `bash`, `curl`, and `flock` are installed on VPS.
+On the VPS: `git`, `bash`, `curl`, `cron`, `flock`, `find`, `rg` (ripgrep — used by `install-cron.sh`), Docker (for Syncthing compose only).
 
 ## Quick start
 
-1. Create a local clone of this tooling repo on VPS.
-2. Set commit identity (either global git config or `vps/.env` author fields).
-3. Bootstrap a vault repo:
+1. Clone this repo on the VPS (`/opt/Corpus`).
+2. Set author in `/opt/Corpus/vps/.env` (see `vps/.env.example`).
+3. Start Syncthing: `cd /opt/Corpus/vps && cp .env.example .env && docker compose up -d`.
+4. Bootstrap a vault: `./scripts/init-vault.sh git@github.com:you/my-vault.git`
+5. Point Syncthing at `/srv/vaults/<name>` — no Corpus-specific Syncthing config.
+6. Cron: `./vps/install-cron.sh <vault-name>`.
 
-```bash
-./scripts/init-vault.sh git@github.com:you/my-vault.git
-```
+Emergency one-shot: **`CORPUS_SYNC_FORCE=1`** on `sync-loop` bypasses Syncthing skips (still uses trap cleanup for `.corpus-git-in-progress`).
 
-1. Configure Syncthing folder for `/srv/vaults/my-vault` and devices.
-1. Install cron entry:
-
-```bash
-./vps/install-cron.sh \
-  --vault-dir /srv/vaults/my-vault \
-  --interval-minutes 5
-```
-
-## Notifications
-
-Webhook notifications are optional and simplest for VPS maintenance.
-
-- Set `NOTIFY_WEBHOOK_URL` in `vps/.env` (copy from `vps/.env.example`).
-- On pull/rebase conflicts or sync errors, the cron loop sends a JSON payload.
-- You can point this to a relay/service of your choice (for example Telegram bridge).
-
-Optional: use local mail on hosts where outbound mail is already configured.
+Optional **`SYNCTHING_PAUSE_FOR_GIT=1`** + API key calls **`POST /rest/system/pause`** for the git window (`resume` on exit); a serial **`flock`** avoids overlapping vault crons stepping on pause/resume. Often unnecessary — see **`docs/setup-and-operations.md`**.
 
 ## Vault conventions
 
-- `manifest.json` is tracked and required.
-- `manifest.sources[].filename` paths are vault-root-relative (for example `raw/foo.md`).
-- `manifest.sources[].wiki_pages` paths are relative to `wiki/` with no `wiki/` prefix (for example `concepts/foo.md`).
-- `manifest.sources[].ingested_at` uses ISO 8601 UTC.
+- `manifest.json` is tracked (`filename` vault-relative; `wiki_pages` paths without `wiki/` prefix; `ingested_at` ISO UTC).
+- Cooperation file **`.corpus-git-in-progress`** is **gitignored** (written only during each cron git run).
 
-## Cron sync semantics
-
-For each run:
-
-1. Stage and commit local working tree changes (if any).
-2. `git pull --rebase`.
-3. `git push`.
-
-If any step fails, the run stops and sends notification (when configured).
+See `docs/setup-and-operations.md` for fuller notes.

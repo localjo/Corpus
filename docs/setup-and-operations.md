@@ -1,119 +1,80 @@
 # Setup and operations
 
-## 1) VPS prerequisites
+## VPS packages
 
-- Ubuntu/Debian-class host (Hetzner smallest tier is fine).
-- Installed: `git`, `bash`, `curl`, `cron`, `flock`, `docker`, `docker compose`.
-- Directory for vaults (example: `/srv/vaults`).
+Ubuntu/Debian: `git`, `bash`, `curl`, `cron`, `findutils`, `flock` (often in `util-linux`), `ripgrep` (package `ripgrep`, provides `rg` for `install-cron.sh`), `docker.io`, Docker Compose plugin.
 
-## 2) Per-vault GitHub prerequisites (manual)
+## GitHub access
 
-For each vault:
+Manual private repo creation per vault + SSH deploy key (or HTTPS + PAT).
 
-1. Create the private GitHub repository manually.
-2. Configure VPS push auth:
-   - Preferred: SSH deploy key on the repo.
-   - Fallback: PAT over HTTPS remote.
+## Corpus clone
 
-## 3) Start Syncthing
+`/opt/Corpus` from GitHub — `git pull --rebase origin main` when tools update.
 
-From this repo:
+`/opt/Corpus/vps/.env` from `.env.example` — set webhook and git author strings as needed.
+
+## Syncthing (Docker)
 
 ```bash
-cd vps
-cp .env.example .env
+cd /opt/Corpus/vps
 docker compose up -d
 ```
 
-Then in Syncthing UI:
+In the Syncthing UI, add a folder whose path is `/srv/vaults/<vault-name>`. Share with Mac/iPhone — **nothing else required** for Corpus locking: per [Syncthing’s “Temporary files”](https://docs.syncthing.net/users/syncing.html), in-flight pulls write **`basename.tmp`** files prefixed **`\.syncthing.`** or **`~syncthing~`**; unresolved [conflicts](https://docs.syncthing.net/users/syncing.html) use **`basename.sync-conflict-…`** (or a leading **`\.sync-conflict-…`**). **`sync-loop` skips commits only for those**, not for other reserved-namespace names without **`.tmp`** (e.g. a stray **`\.syncthing.notes.md`** Syncthing would ignore anyway).
 
-- Add each vault folder under `/srv/vaults/<vault-name>`.
-- Share with Mac/iPhone devices.
-- Keep `.git` excluded from Syncthing data flow.
-
-## 4) Bootstrap a vault
-
-Before first bootstrap commit, set git identity (one-time on VPS):
+## Vault bootstrap
 
 ```bash
-git config --global user.name "Corpus Sync Bot"
-git config --global user.email "corpus-bot@yourdomain.com"
+/opt/Corpus/scripts/init-vault.sh git@github.com:you/repo.git
+git -C /srv/vaults/<repo-base> push origin main
 ```
 
-Alternative (preferred for this repo): define in `/opt/Corpus/vps/.env`:
+## Cron
 
 ```bash
-GIT_AUTHOR_NAME=Corpus Sync Bot
-GIT_AUTHOR_EMAIL=corpus-bot@yourdomain.com
+/opt/Corpus/vps/install-cron.sh <vault-name>
 ```
 
-```bash
-./scripts/init-vault.sh git@github.com:you/my-vault.git
-```
+Each invocation:
 
-What this does:
+- Exits **`0` skip** if Syncthing **pull temps** (`.syncthing.*.tmp` or `~syncthing~*.tmp`) or unresolved **sync-conflict** files exist under the vault (incoming batch / conflict cleanup not finished).
+- Touches `.corpus-git-in-progress`, runs `git add`/`commit` (if dirty) / `pull --rebase` / `push`, removes `.corpus-git-in-progress` in a `trap` on exit.
 
-- Derives vault name from repo URL and clones into `/srv/vaults/<repo-name>`.
-- Creates missing `raw/`, `wiki/index.md`, `manifest.json`, `CLAUDE.md`, `.gitignore` without overwriting existing vault content.
-- Copies skills to `.claude/skills/`.
-- Creates bootstrap commit with starter files and skills staged.
+`flock -n` in the cron line means a tick **skips immediately** if the previous run has not finished (no queueing).
 
-Push bootstrap commit:
+## Stale coordination files
 
-```bash
-git -C /srv/vaults/<repo-name> push origin main
-```
+If a run is killed `-9`, remove stale `.corpus-git-in-progress` by hand once. Optionally `CORPUS_SYNC_FORCE=1` for recovery.
 
-## 5) Install cron sync loop
+Legacy **`.corpus-syncthing-folder-id`** from older Corpus can be deleted; it is unused.
 
-```bash
-./vps/install-cron.sh \
-  --vault-dir /srv/vaults/my-vault \
-  --interval-minutes 5 \
-  --branch main \
-  --env-file /absolute/path/to/Corpus/vps/.env
-```
+### Lock semantics (what blocks what)
 
-Cron behavior per run:
+- **Cron skips commit** when: pull temps `.syncthing.*.tmp` or `~syncthing~*.tmp` exist; or conflict copies match `*.sync-conflict-*` or `.sync-conflict-*`.
+- **Cron does not skip** solely because a non-temp `.syncthing.whatever` name exists (Syncthing ignores that namespace anyway).
+- **`.corpus-git-in-progress`** is written only by `sync-loop`; it does **not** stop Syncthing or editors unless **you** add something that watches it.
 
-1. `git add -A`
-2. commit (if changes)
-3. `git pull --rebase`
-4. `git push`
+`.corpus-git-in-progress` is for **visibility and future hooks**; nothing in stock Syncthing or Obsidian listens to it today.
 
-Safety:
+**Stale `.syncthing….tmp`**: Syncthing may retain a `.tmp` for up to ~a day after some errors ([docs](https://docs.syncthing.net/users/syncing.html)) — cron stays blocked until Syncthing removes it or you delete it.
 
-- `flock` lock per vault prevents overlap of slow/stacked runs.
-- Failures stop the run.
+Syncthing’s reserved prefix without `.tmp` does **not** block cron anymore; prefer not to use `.syncthing…` or `~syncthing~` prefixes in your **own** filenames anyway (Syncthing ignores those paths).
 
-## 6) Notification setup
+### Optional: pause Syncthing while git runs
 
-Webhook is the default low-maintenance option.
+**Do you need this?** Often **no**. After the `.syncthing.*.tmp` / conflict guards, commits are usually a few seconds; overlap with inbound sync is uncommon. Turning pause on buys a stricter mutual-exclusion window at the cost of **API setup** (`SYNCTHING_API_URL` + `SYNCTHING_API_KEY` only — still no Folder ID).
 
-In `vps/.env`:
+Implementation: **`POST /rest/system/pause`** pauses connections to remote **devices**; **`POST /rest/system/resume`** restores ([docs](https://docs.syncthing.net/rest/system-pause-post.html)). A host-wide **`flock`** serializes all vault **`sync-loop`** runs that use pause, so Vault A cannot `resume` while Vault B still holds peers paused.
 
-```bash
-NOTIFY_WEBHOOK_URL=https://your-endpoint.example/hook
-DEFAULT_BRANCH=main
-COMMIT_MESSAGE_PREFIX=sync
-GIT_AUTHOR_NAME=Corpus Bot
-GIT_AUTHOR_EMAIL=corpus-bot@example.com
-```
+Enable in `vps/.env`:
 
-On failure (commit/pull-rebase/push), the script POSTs JSON:
+- `SYNCTHING_PAUSE_FOR_GIT=1`
+- `SYNCTHING_API_KEY=…` (from Syncthing **Actions → Settings → API**)
+- Optionally `SYNCTHING_API_URL` if not `http://127.0.0.1:8384`
 
-```json
-{
-  "vault": "/srv/vaults/my-vault",
-  "step": "pull-rebase",
-  "message": "command failed: git -C ... pull --rebase origin main"
-}
-```
+`CORPUS_SYNC_FORCE=1` skips pause as well.
 
-## 7) Vault content contract
+## Agent / multi-device edits
 
-- `manifest.json` must remain tracked.
-- `manifest.sources[].filename` is vault-root-relative (`raw/foo.md`).
-- `manifest.sources[].wiki_pages` is relative to `wiki/` only (`concepts/foo.md`).
-- `manifest.sources[].ingested_at` uses ISO 8601 UTC.
-- Shared `.obsidian` config is committed, local-only state is ignored.
+Agent and device edits reach the VPS through **git** or **Syncthing**; cron coordinates with Syncthing via temp/conflict skips and optionally **pause during git**. Prefer coherent **`git commit` + `git push`** when batches should land as atomic commits on GitHub.

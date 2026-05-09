@@ -77,3 +77,4 @@ fi
 echo "Vault initialized at $VAULT_DIR"
 echo "Remote: $REPO_URL"
 echo "Next: git -C \"$VAULT_DIR\" push origin \"$BRANCH\""
+echo "Then: /opt/Corpus/vps/install-cron.sh \"$VAULT_NAME\""

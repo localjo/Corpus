@@ -7,6 +7,14 @@ Shared operational behavior is defined by the installed skills in `.claude/skill
 
 `manifest.json` is required and tracked. Schema: `{"version":1,"sources":[{"filename":"raw/foo.md","wiki_pages":["concepts/bar.md"],"ingested_at":"2026-05-01T14:32:00Z"}]}`. `filename` is vault-root-relative, `wiki_pages` are relative to `wiki/` (no `wiki/` prefix), and `ingested_at` must be ISO 8601 UTC.
 
+## VPS cron and locks (automatic)
+
+Per Syncthing, in-flight pulls use `.syncthing.*.tmp` or `~syncthing~*.tmp`; unresolved conflicts use `*.sync-conflict-*` (or `.sync-conflict-*`). The VPS `sync-loop` skips commits only when those patterns exist—not for other `.syncthing.*` names without `.tmp`.
+
+Cron creates `.corpus-git-in-progress` for the duration of each git run (`pull`/`commit`/`push`) so overlapping automation can observe an in-flight sync.
+
+Agent edits arrive via **git** and/or **Syncthing**; use coherent commits + push when a batch should be one logical revision on GitHub.
+
 ## Formatting rules
 
 - In markdown table cells, if a wikilink display label contains `|`, escape it as `\|`.
