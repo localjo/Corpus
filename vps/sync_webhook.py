@@ -216,6 +216,13 @@ def main() -> None:
 
         def _respond_after_sync(self, proc: subprocess.CompletedProcess[str]) -> None:
             if proc.returncode != 0:
+                tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-20:]
+                if tail:
+                    sys.stderr.write(
+                        f"sync-loop exit={proc.returncode}; tail:\n  "
+                        + "\n  ".join(tail)
+                        + "\n"
+                    )
                 self._json(
                     502,
                     {"ok": False, "sync_completed": False, "exit": proc.returncode},

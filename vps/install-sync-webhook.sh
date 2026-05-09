@@ -68,7 +68,7 @@ if [[ "$(id -u)" -ne 0 ]]; then
   exit 0
 fi
 
-if [[ ! -f "$UNIT_DST" ]]; then
+if ! cmp -s "$UNIT_SRC" "$UNIT_DST" 2>/dev/null; then
   cp "$UNIT_SRC" "$UNIT_DST"
   systemctl daemon-reload
 fi
