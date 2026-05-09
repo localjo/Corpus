@@ -21,7 +21,7 @@ cd /opt/Corpus/vps
 docker compose up -d
 ```
 
-In the Syncthing UI, add a folder whose path is `/srv/vaults/<vault-name>`. Share with Mac/iPhone — **nothing else required** for Corpus locking: per [Syncthing’s “Temporary files”](https://docs.syncthing.net/users/syncing.html), in-flight pulls write **`basename.tmp`** files prefixed **`\.syncthing.`** or **`~syncthing~`**; unresolved [conflicts](https://docs.syncthing.net/users/syncing.html) use **`basename.sync-conflict-…`** (or a leading **`\.sync-conflict-…`**). **`sync-loop` skips commits only for those**, not for other reserved-namespace names without **`.tmp`** (e.g. a stray **`\.syncthing.notes.md`** Syncthing would ignore anyway).
+In the Syncthing UI, add a folder whose path is **`/srv/vaults/<vault-name>`** — `docker-compose.yml` binds host **`/srv/vaults`** to the **same** path inside the container, so it matches `init-vault.sh` and cron. If you previously used **`/var/syncthing/vaults/...`**, change the folder path in the UI (or remove and re-add) after updating compose. Share with Mac/iPhone — **nothing else required** for Corpus locking: per [Syncthing’s “Temporary files”](https://docs.syncthing.net/users/syncing.html), in-flight pulls write **`basename.tmp`** files prefixed **`\.syncthing.`** or **`~syncthing~`**; unresolved [conflicts](https://docs.syncthing.net/users/syncing.html) use **`basename.sync-conflict-…`** (or a leading **`\.sync-conflict-…`**). **`sync-loop` skips commits only for those**, not for other reserved-namespace names without **`.tmp`** (e.g. a stray **`\.syncthing.notes.md`** Syncthing would ignore anyway).
 
 ## Vault bootstrap
 
