@@ -1,11 +1,8 @@
 # Corpus
 
-Minimal tooling for a personal wiki workflow:
+> Tools for managing a Karpathy-style LLM second brain on a VPS.
 
-- One private GitHub repo per vault.
-- Vault files synced to devices via Syncthing.
-- Git operations run on VPS only (cron loop).
-- Claude Code uses committed vault files and skills.
+Your wiki lives on a cheap VPS, backed up to a private GitHub repo via a cron job. You chat with Claude Code in the cloud from any device — phone, tablet, laptop — and it reads and updates the wiki directly. Syncthing syncs the vault to Obsidian on your devices so you can also browse and manually edit notes or drop in new raw sources. No git on your devices, no complicated sync setup — git only runs on the VPS.
 
 ## Quick start
 
