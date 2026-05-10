@@ -11,36 +11,30 @@ Minimal tooling for a personal wiki workflow:
 
 - Vault bootstrap templates (`raw/`, `wiki/`, `manifest.json`, `CLAUDE.md`, `.gitignore`).
 - Shared skill files in `.claude/skills/` (copied into each vault).
-- **`vps/sync-loop.sh`**: cron-friendly `git` loop with **automatic** safeguards:
-  - Skips committing while Syncthing **pull temps** (`.syncthing.*.tmp` or `~syncthing~*.tmp`) exist, or while unresolved **conflict** files (`*.sync-conflict-*` or `.sync-conflict-*`) exist ([Syncthing docs](https://docs.syncthing.net/users/syncing.html)).
-  - Creates **`.corpus-git-in-progress`** for the lifetime of each run (visibility / hooks; not read by stock Syncthing).
-  - Cron entry uses per-vault **`flock -n`** so overlapping ticks skip instead of running two git loops on the same repo.
-
-## Prerequisites
-
-Per vault: private GitHub repo + VPS SSH access to git push.
-
-On the VPS: `git`, `bash`, `curl`, `cron`, `flock`, `find`, `rg` (ripgrep — used by `install-cron.sh`), Docker (for Syncthing compose only).
+- **`vps/sync-loop.sh`**: cron-friendly git loop that safely coordinates with Syncthing.
+- **`vps/sync_webhook.py`**: optional HTTP endpoint so agents can trigger syncs on demand.
 
 ## Quick start
 
-1. Clone this repo on the VPS (`/opt/Corpus`).
-2. Set author in `/opt/Corpus/vps/.env` (see `vps/.env.example`).
-3. Start Syncthing: `cd /opt/Corpus/vps && cp .env.example .env && docker compose up -d`.
-4. Bootstrap a vault: `./scripts/init-vault.sh git@github.com:you/my-vault.git` (creates **`vps/.env`** from **`.env.example`** if missing).
-5. Let Syncthing’s container user own the vault tree (default **`PUID`/`PGID` `1000`** in **`vps/docker-compose.yml`**): **`sudo chown -R 1000:1000 /srv/vaults`** (avoids **`permission denied`** on **`/srv/vaults`** / **`.stfolder`**). Detail: **`docs/setup-and-operations.md`** → *Syncthing (Docker)*.
-6. In Syncthing’s UI, folder path **`/srv/vaults/<name>`** (same path in container and on host).
-7. Cron: `./vps/install-cron.sh <vault-name>` (default every **5** minutes; **`install-cron`** also sets **`safe.directory`** for the cron user; **`sync-loop`** trusts **`--vault-dir`** per run).
+1. **Set up a VPS.** Provision an Ubuntu/Debian server and install the required system packages (`git`, `docker`, `cron`, and a few others).
 
-Emergency one-shot: **`CORPUS_SYNC_FORCE=1`** on **`sync-loop`** bypasses Syncthing skips.
+2. **Create a GitHub repository.** Make a new private repo for each vault. Configure SSH or HTTPS access from the VPS so it can push commits.
 
-Optional **`SYNCTHING_PAUSE_FOR_GIT=1`** — see **`docs/setup-and-operations.md`** and **`vps/.env.example`**.
+3. **Install Corpus.** Clone this repo onto the VPS at `/opt/Corpus`.
 
-**Sync webhook (optional):** HTTP on **`127.0.0.1:8780`** runs the same **`sync-loop`** as cron — **`POST /sync/<vault>`** (unauthenticated; idempotent + per-vault flock rate limit) for agents to flush on demand, and **`POST /hooks/github`** (HMAC) for pushes on **`main`**. One-time global install (vaults under **`/srv/vaults`** are auto-discovered): **`sudo /opt/Corpus/vps/install-sync-webhook.sh`** — see **`docs/setup-and-operations.md`**.
+4. **Set environment variables.** Copy `vps/.env.example` to `vps/.env` and set your git author name, email, and any optional settings.
+
+5. **Initialize a vault.** Run `scripts/init-vault.sh` with your vault's GitHub remote URL. This bootstraps the vault directory structure and pushes an initial commit.
+
+6. **Connect the vault to Syncthing.** Start Syncthing via Docker Compose, then add your vault folder in the Syncthing UI and share it with your devices. A cron job runs `sync-loop.sh` to keep git in sync on the VPS side.
+
+7. **Connect to Claude Code.** Open the vault directory in Claude Code (on the VPS or on any synced device). The bootstrapped `CLAUDE.md` and `.claude/skills/` give Claude the context it needs to work with your vault.
+
+8. **Basic usage workflow.** Add or edit notes from any synced device. Syncthing propagates changes to the VPS; the cron loop commits and pushes to GitHub every few minutes. From Claude Code, use the vault skills to ingest, query, restructure, and manage content.
+
+For detailed instructions, troubleshooting, and all configuration options, see [docs/setup-and-operations.md](docs/setup-and-operations.md).
 
 ## Vault conventions
 
 - `manifest.json` is tracked (`filename` vault-relative; `wiki_pages` paths without `wiki/` prefix; `ingested_at` ISO UTC).
-- Cooperation file **`.corpus-git-in-progress`** is **gitignored** (written only during each cron git run).
-
-See `docs/setup-and-operations.md` for fuller notes.
+- Cooperation file **`.corpus-git-in-progress`** is gitignored (written only during each cron git run).
