@@ -15,7 +15,7 @@ Minimal tooling for a personal wiki workflow:
 
 3. **Install Corpus.** Clone this repo onto the VPS.
 
-4. **Set environment variables.** Fill in your author name, email, and any optional settings.
+4. **Set environment variables.** Fill in your credentials and secrets.
 
 5. **Initialize a vault.** Run the bootstrap script with your vault's GitHub URL. It sets up the directory structure and pushes an initial commit.
 
@@ -23,6 +23,6 @@ Minimal tooling for a personal wiki workflow:
 
 7. **Connect to Claude Code.** Open the vault in Claude Code on the VPS or any synced device. The bootstrapped context and skill files give Claude what it needs to work with your vault.
 
-8. **Basic usage workflow.** Edit notes from any device. Syncthing propagates changes to the VPS; the cron loop commits and pushes to GitHub every few minutes. Use the vault skills in Claude Code to ingest, query, restructure, and manage content.
+8. **Basic usage workflow.** Chat with Claude Code in the cloud from any device — it reads and updates the vault directly. Syncthing keeps the vault in sync so changes are reflected everywhere. Editing notes in Obsidian on your devices is also supported.
 
 See [docs/setup-and-operations.md](docs/setup-and-operations.md) for detailed instructions, commands, and troubleshooting.
